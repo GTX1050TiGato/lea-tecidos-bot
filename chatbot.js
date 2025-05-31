@@ -102,7 +102,12 @@ const iniciarBot = async () => {
     // Obter informações do contato automaticamente
     const contact = await msg.getContact();
     const nome = contact.pushname || contact.name || 'Cliente';
-    const telefone = msg.from.split('@')[0];
+    const telefoneBruto = msg.from.split('@')[0];
+    const telefoneApenasNumeros = telefoneBruto.replace(/\D/g, '').replace(/^55/, '');
+    
+    let telefone = telefoneApenasNumeros.replace(/^(\d{2})(\d{4})(\d{4})$/,'($1) $2-$2');
+    
+
 
     // Cadastro simplificado
     if (msg.body.trim() === 'Olá Léa Tecidos, gostaria de me cadastrar.') {
@@ -152,11 +157,13 @@ const iniciarBot = async () => {
 
     // Respostas do menu (mantidas)
     const responses = {
-      '1': '🧵 *ITENS À VENDA* 🧵\n\n' +
-           '- Tecido para sofá: *R$ 30/m²*\n' +
-           '- Tecido para cama: *R$ 40/m²*\n' +
-           '- Cortinas personalizadas: *R$ 25/m²*',
-      // ... (outras respostas)
+      '1': '🧵 *Itens à venda* 🧵\n- Tecido para sofá: R$30/m²\n- Tecido para cama: R$40/m²',
+      '2': '📝 Formulário de avaliação:\nhttps://docs.google.com/forms/d/e/1FAIpQLSeNE0IaNcQD2xgwyPAySfi2YiMaljgVAG81GPCw3xSML5cc5g/viewform?usp=dialog',
+      '3': '📍 *Localização* 📍\nRua 13 de Maio, 80 - Campina\nhttps://maps.app.goo.gl/eJADyoJ4VDLobwZPA',
+      '4': '🌐 *Redes Sociais* 🌐\nInstagram: @LeaTecidos\nFacebook: /LeaTecidos',
+      '5': '📞 *Atendimento* 📞\nLeo: (91) 8241-0602\nRegina: (91) 8187-4800',
+      '6': '👥 Entre na nossa comunidade:\nhttps://whatsapp.com/channel/0029Vb5gFwBJENy9UqVIUi1u',
+      '7': '✅ Conversa encerrada. Digite "menu" a qualquer momento para reiniciar!'
     };
 
     if (responses[msg.body]) {

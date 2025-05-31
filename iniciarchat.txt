@@ -1,0 +1,5 @@
+@echo off
+cd /d "C:\Users\lucas\OneDrive\Desktop\botzap\chatbot.js"  // Altere o caminho para a pasta onde está o seu chatbot.js
+echo Iniciando o chatbot...
+node chatbot.js
+pause
