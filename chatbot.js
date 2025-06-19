@@ -4,13 +4,18 @@ const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
 const { initializeApp } = require('firebase/app');
-const { getDatabase, ref, push, set } = require('firebase/database');
+const { getDatabase, ref, push, set, get, child, remove } = require('firebase/database');
+const {cadastrarCliente, verificarDiretorioSessao, deletarCliente, pegartelefone, mandarparacadastrados} = require('./comandos/comandos');
+const axios = require('axios');
+
+
+
 
 // Configurações (mantidas as mesmas)
 const INACTIVITY_TIME = 5 * 60 * 1000;
 const CLEANUP_INTERVAL = 60 * 1000;
 const userTimers = new Map();
-
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // Configuração do Firebase (mantida a mesma)
 const firebaseConfig = {
   apiKey: "AIzaSyAYCDuVgcRjarXTqOLG-WN4wESTKkMSbi4",
@@ -32,11 +37,7 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
-// Funções auxiliares (mantidas)
-const verificarDiretorioSessao = () => {
-  const dir = path.join(__dirname, 'sessions');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-};
+
 
 const logout = () => {
   const sessionPath = path.join(__dirname, 'sessions');
@@ -46,35 +47,19 @@ const logout = () => {
   }
 };
 
-// Função principal modificada
+
 const iniciarBot = async () => {
   verificarDiretorioSessao();
   
-  const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: { headless: true }
-  });
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    executablePath: '/usr/bin/google-chrome',
+    headless: true
+  }
+});
 
-  // Gerenciamento de temporizadores (mantido)
-  const resetTimer = (userId) => {
-    if (userTimers.has(userId)) clearTimeout(userTimers.get(userId));
-    
-    const newTimer = setTimeout(async () => {
-      try {
-        await client.sendMessage(
-          userId,
-          '📋 Por favor, avalie sua experiência:\n' +
-          'https://docs.google.com/forms/d/e/1FAIpQLSc_fW8W4uKwUeJeOtv97c3u8hrdUH1xgsij83lQQtFXk6aIkw/viewform\n\n' +
-          'Digite "menu" para reiniciar!'
-        );
-        userTimers.delete(userId);
-      } catch (error) {
-        console.error('Erro ao enviar formulário:', error);
-      }
-    }, INACTIVITY_TIME);
 
-    userTimers.set(userId, newTimer);
-  };
 
   setInterval(() => {
     const now = Date.now();
@@ -92,56 +77,38 @@ const iniciarBot = async () => {
   client.on('ready', () => {
     console.log('✅ Bot pronto para uso!');
     comandoTerminal(client);
+setInterval(async () => {
+  await pegartelefone();
+  await mandarparacadastrados(client);
+}, 5000);
   });
-
+  
   client.on('message', async msg => {
     if (!msg.from.endsWith('@c.us')) return;
-
-    resetTimer(msg.from);
 
     // Obter informações do contato automaticamente
     const contact = await msg.getContact();
     const nome = contact.pushname || contact.name || 'Cliente';
     const telefoneBruto = msg.from.split('@')[0];
     const telefoneApenasNumeros = telefoneBruto.replace(/\D/g, '').replace(/^55/, '');
-    
-    let telefone = telefoneApenasNumeros.replace(/^(\d{2})(\d{4})(\d{4})$/,'($1) $2-$2');
-    
 
+    let telefone = telefoneApenasNumeros.replace(/^(\d{2})(\d{4})(\d{4})$/,'($1) 9$2-$3');
+    // -------------------------------------------------------------------------------------
 
-    // Cadastro simplificado
-    if (msg.body.trim() === 'Olá Léa Tecidos, gostaria de me cadastrar.') {
-      try {
-        // Salvar no Firebase
-        const clientesRef = ref(database, 'clientes');
-        const novoCadastroRef = push(clientesRef);
-        await set(novoCadastroRef, {
-          nome,
-          telefone,
-          dataCadastro: new Date().toISOString()
-        });
-
-        // Confirmação
-        await client.sendMessage(msg.from,
-          `✅ *Cadastro automático realizado!* ✅\n\n` +
-          `👤 Nome: ${nome}\n` +
-          `📱 Número: ${telefone}\n\n` +
-          `Obrigado por se cadastrar na Léa Tecidos!`
-        );
-
-      } catch (error) {
-        console.error('Erro no cadastro:', error);
-        await client.sendMessage(msg.from,
-          '❌ *Erro no cadastro automático!* ❌\n\n' +
-          'Por favor, entre em contato com nosso atendimento.'
-        );
-      }
+    // --------funções de cadastro e deleção--------
+    if (msg.body.trim().toLowerCase().startsWith('/cadastrar')) {
+      await cadastrarCliente(database, telefone, nome, client, msg);
       return;
     }
+    if (msg.body.trim().toLowerCase().startsWith('/deletar')) {
+      await deletarCliente(database, telefone, client, msg);
+      return;
+    }
+    // --------------------------------------------
 
-    // Lógica do menu (mantida)
+    // Menu principal
     if (msg.body.match(/^(oi|olá|ola|menu)$/i)) {
-      const menuMessage = 
+      const menuMessage =
         '🏷️ *MENU PRINCIPAL* 🏷️\n\n' +
         '1️⃣ Ver itens à venda\n' +
         '2️⃣ Formulário de avaliação\n' +
@@ -151,11 +118,51 @@ const iniciarBot = async () => {
         '6️⃣ Comunidade Léa Tecidos\n' +
         '7️⃣ Encerrar conversa\n\n' +
         'Digite o *número* da opção desejada:';
-      
+
       await client.sendMessage(msg.from, menuMessage);
+      return;
     }
 
-    // Respostas do menu (mantidas)
+ 
+
+
+
+// Função auxiliar para buscar mensagem em objetos JSON
+function encontrarMensagem(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    
+    // Verifica se existe uma propriedade 'mensagem' direta
+    if (obj.mensagem && typeof obj.mensagem === 'string') {
+        return obj.mensagem;
+    }
+    
+    // Busca recursivamente em todas as propriedades do objeto
+    for (const key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            const value = obj[key];
+            if (typeof value === 'object') {
+                const result = encontrarMensagem(value);
+                if (result) return result;
+            }
+        }
+    }
+    
+    return null;
+}
+
+// Função para buscar recursivamente 'mensagem' em objetos JSON
+function encontrarMensagem(obj) {
+    for (const key in obj) {
+        if (key === 'mensagem') return obj[key];
+        if (typeof obj[key] === 'object') {
+            const result = encontrarMensagem(obj[key]);
+            if (result) return result;
+        }
+    }
+    return null;
+}
+
+    // Respostas do menu
     const responses = {
       '1': '🧵 *Itens à venda* 🧵\n- Tecido para sofá: R$30/m²\n- Tecido para cama: R$40/m²',
       '2': '📝 Formulário de avaliação:\nhttps://docs.google.com/forms/d/e/1FAIpQLSeNE0IaNcQD2xgwyPAySfi2YiMaljgVAG81GPCw3xSML5cc5g/viewform?usp=dialog',
@@ -164,15 +171,19 @@ const iniciarBot = async () => {
       '5': '📞 *Atendimento* 📞\nLeo: (91) 8241-0602\nRegina: (91) 8187-4800',
       '6': '👥 Entre na nossa comunidade:\nhttps://whatsapp.com/channel/0029Vb5gFwBJENy9UqVIUi1u',
       '7': '✅ Conversa encerrada. Digite "menu" a qualquer momento para reiniciar!'
+      
     };
 
     if (responses[msg.body]) {
       await client.sendMessage(msg.from, responses[msg.body]);
+      return;
     }
   });
 
   client.initialize();
-};
+  
+}
+
 
 // Sistema de comandos do terminal (mantido)
 const comandoTerminal = (client) => {
@@ -198,3 +209,4 @@ iniciarBot().catch(err => {
   console.error('Erro inicial:', err);
   process.exit(1);
 });
+
